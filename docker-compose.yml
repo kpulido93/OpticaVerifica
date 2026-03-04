@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: optima-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    networks:
+      - optima-network
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: optima-api
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${API_ENVIRONMENT:-Development}
+      - ConnectionStrings__DefaultConnection=Server=${MYSQL_HOST};Port=${MYSQL_PORT};Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD};
+      - Auth__AdminUser=${AUTH_ADMIN_USER}
+      - Auth__AdminPassword=${AUTH_ADMIN_PASSWORD}
+      - Auth__OperatorUser=${AUTH_OPERATOR_USER}
+      - Auth__OperatorPassword=${AUTH_OPERATOR_PASSWORD}
+      - Auth__ReaderUser=${AUTH_READER_USER}
+      - Auth__ReaderPassword=${AUTH_READER_PASSWORD}
+      - Worker__MaxConcurrentJobs=${WORKER_MAX_CONCURRENT_JOBS:-5}
+      - Worker__BatchSize=${WORKER_BATCH_SIZE:-100}
+      - Worker__MaxIdsPerJob=${WORKER_MAX_IDS_PER_JOB:-10000}
+    ports:
+      - "${API_PORT:-5000}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - optima-network
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: optima-worker
+    restart: unless-stopped
+    environment:
+      - DOTNET_ENVIRONMENT=${API_ENVIRONMENT:-Development}
+      - ConnectionStrings__DefaultConnection=Server=${MYSQL_HOST};Port=${MYSQL_PORT};Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD};
+      - Worker__MaxConcurrentJobs=${WORKER_MAX_CONCURRENT_JOBS:-5}
+      - Worker__BatchSize=${WORKER_BATCH_SIZE:-100}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - optima-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: optima-frontend
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:5000}
+      - NEXT_PUBLIC_APP_NAME=${NEXT_PUBLIC_APP_NAME:-Optima Verifica}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - optima-network
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  optima-network:
+    driver: bridge

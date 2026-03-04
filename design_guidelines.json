@@ -1,0 +1,145 @@
+{
+  "identity": {
+    "name": "Optima Verifica",
+    "description": "High-performance data verification and query platform",
+    "emotional_archetype": "Cyber-Swiss (Archetype 7 + 4)",
+    "tone": "Professional, Secure, Precise, Technical",
+    "target_audience": "Data Operators, System Admins"
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight",
+      "h2": "text-3xl font-semibold tracking-tight",
+      "h3": "text-2xl font-semibold",
+      "body_lg": "text-lg leading-relaxed",
+      "body_base": "text-base leading-normal",
+      "body_sm": "text-sm text-muted-foreground",
+      "caption": "text-xs text-muted-foreground uppercase tracking-wider"
+    },
+    "weights": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    }
+  },
+  "colors": {
+    "mode": "dark",
+    "palette": {
+      "background": "#09090b",
+      "surface": "#18181b",
+      "surface_highlight": "#27272a",
+      "border": "#27272a",
+      "primary": "#3b82f6",
+      "primary_hover": "#2563eb",
+      "primary_foreground": "#ffffff",
+      "secondary": "#27272a",
+      "secondary_foreground": "#fafafa",
+      "accent": "#06b6d4",
+      "success": "#10b981",
+      "warning": "#f59e0b",
+      "destructive": "#ef4444",
+      "text_primary": "#fafafa",
+      "text_secondary": "#a1a1aa",
+      "text_muted": "#52525b"
+    },
+    "gradients": {
+      "primary_glow": "linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%)",
+      "surface_shine": "linear-gradient(to bottom right, rgba(255,255,255,0.05), rgba(0,0,0,0))"
+    }
+  },
+  "visual_enhancers": {
+    "borders": "1px solid #27272a",
+    "radius": {
+      "sm": "0.25rem",
+      "md": "0.5rem",
+      "lg": "0.75rem",
+      "xl": "1rem"
+    },
+    "shadows": {
+      "card": "0 1px 3px 0 rgba(0, 0, 0, 0.5), 0 1px 2px -1px rgba(0, 0, 0, 0.5)",
+      "glow": "0 0 15px rgba(59, 130, 246, 0.3)"
+    },
+    "effects": {
+      "glass": "backdrop-blur-xl bg-black/60 border border-white/10",
+      "tracing_beam": "absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/20 to-transparent opacity-0 animate-pulse"
+    }
+  },
+  "layout": {
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "dashboard_grid": "grid grid-cols-1 md:grid-cols-12 gap-6",
+    "table_density": "compact",
+    "spacing": {
+      "section": "py-12",
+      "component": "p-6"
+    }
+  },
+  "components": {
+    "Login": {
+      "path": "/app/frontend/src/pages/Login.js",
+      "description": "Split screen. Left: Abstract digital waves. Right: Form. Minimal inputs.",
+      "image_bg": "https://images.unsplash.com/photo-1760112783543-737c7721a824?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBibHVlJTIwZGlnaXRhbCUyMHdhdmVzJTIwdGVjaG5vbG9neSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzcyNTk2MDIwfDA&ixlib=rb-4.1.0&q=85"
+    },
+    "Dashboard": {
+      "path": "/app/frontend/src/pages/Dashboard.js",
+      "layout": "Bento Grid",
+      "sections": [
+        {
+          "name": "Quick Actions",
+          "span": "col-span-12 md:col-span-8",
+          "description": "Card with Textarea for IDs or File Upload dropzone."
+        },
+        {
+          "name": "Active Jobs",
+          "span": "col-span-12 md:col-span-4",
+          "description": "List of running jobs with progress bars."
+        }
+      ]
+    },
+    "PresetDesigner": {
+      "path": "/app/frontend/src/components/admin/PresetDesigner.js",
+      "style": "Two-column Drag and Drop",
+      "left_panel": "Available Columns (Source)",
+      "right_panel": "Selected Columns (Target) + Filters",
+      "visuals": "Card-based items. Handle icon for dragging. Distinct colors for Source vs Target."
+    },
+    "JobDetail": {
+      "path": "/app/frontend/src/pages/JobDetail.js",
+      "features": "Real-time status badge, Download buttons (CSV/JSON), Paginated Data Table with sticky header."
+    }
+  },
+  "image_urls": {
+    "login_bg": "https://images.unsplash.com/photo-1760112783543-737c7721a824?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGRhcmslMjBibHVlJTIwZGlnaXRhbCUyMHdhdmVzJTIwdGVjaG5vbG9neSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzcyNTk2MDIwfDA&ixlib=rb-4.1.0&q=85",
+    "empty_state_jobs": "https://images.unsplash.com/photo-1762281429401-3bd99b5e4e7d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxhYnN0cmFjdCUyMGRhcmslMjBibHVlJTIwZGlnaXRhbCUyMHdhdmVzJTIwdGVjaG5vbG9neSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzcyNTk2MDIwfDA&ixlib=rb-4.1.0&q=85",
+    "empty_state_presets": "https://images.unsplash.com/photo-1759771963975-8a4885446f1f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGRhcmslMjBibHVlJTIwZGlnaXRhbCUyMHdhdmVzJTIwdGVjaG5vbG9neSUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzcyNTk2MDIwfDA&ixlib=rb-4.1.0&q=85"
+  },
+  "instructions_to_main_agent": [
+    "Use standard HTML/JS for logic but style strictly with Tailwind classes provided.",
+    "For the Preset Designer, use a library like 'react-beautiful-dnd' or 'dnd-kit' if available, otherwise implement simple array moving logic.",
+    "Ensure all tables have 'w-full text-left border-collapse'.",
+    "Use 'lucide-react' for icons.",
+    "Dark mode is mandatory. Do not implement light mode toggle.",
+    "All inputs must have 'bg-zinc-900 border-zinc-700 focus:ring-blue-500'.",
+    "Buttons: Primary = blue-600 hover:blue-500; Secondary = zinc-800 hover:zinc-700.",
+    "Use 'sonner' for toast notifications."
+  ],
+  "universal_guidelines": {
+    "general": [
+      "No gradients for text or simple backgrounds.",
+      "Use z-index hierarchy: Base=0, Sticky=10, Dropdown=20, Modal=50, Toast=100.",
+      "Never use 'transition: all'. Use specific transitions.",
+      "No center-aligned app containers.",
+      "Buttons must be consistent: h-10 px-4 py-2 rounded-md."
+    ],
+    "accessibility": [
+      "Ensure contrast ratio of 4.5:1 for normal text.",
+      "All interactive elements must have focus-visible states.",
+      "Use data-testid for all clickable elements."
+    ]
+  }
+}
