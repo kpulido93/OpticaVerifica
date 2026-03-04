@@ -28,24 +28,46 @@ Construir una plataforma web escalable por módulos para ejecutar consultas "pre
 - [x] Basic Authentication con roles (ADMIN/OPERATOR/READER)
 - [x] Endpoints de Presets (GET /api/presets, GET /api/presets/{key})
 - [x] Endpoints de Jobs (POST, GET, Results, Export, Cancel)
-- [x] Endpoints Admin (Schema, Datasets, Presets CRUD, Test)
+- [x] Endpoints Admin (Schema, Datasets, Presets CRUD, Test, Versions, Activate)
 - [x] Servicios: PresetService, JobService, SchemaService, ExportService, PresetExecutor
 - [x] Modelo AST para presets personalizados
 - [x] Compilador AST -> SQL con whitelist validation
+- [x] Compilador de AST Normalizado (nuevo formato JSON)
 
 ### Worker Service
 - [x] BackgroundService para procesar jobs en cola
 - [x] Procesamiento por lotes (batch)
 - [x] Handlers hardcodeados para presets V1
 
-### Frontend (Next.js 14)
+### Frontend (Next.js 14) - MEJORADO
 - [x] Login con Basic Auth
 - [x] Dashboard con carga de cédulas (textarea + file upload)
 - [x] Selector de presets
 - [x] Lista de Jobs con auto-refresh
 - [x] Detalle de Job con resultados paginados
 - [x] Export a CSV/XLSX/JSON
-- [x] Preset Designer visual (ADMIN only)
+- [x] **Preset Designer visual MEJORADO** (ADMIN only):
+  - Schema Explorer tipo árbol con tablas/vistas expandibles
+  - Drag & drop de columnas al SELECT con reordenamiento
+  - Edición inline de alias para columnas
+  - Iconos de tipo de dato (number/date/string/boolean)
+  - Filtros visuales con grupos anidados (AND/OR)
+  - Operadores por tipo: number/date: = != > >= < <= BETWEEN IN
+  - Operadores por tipo: string: = != LIKE IN IS NULL IS NOT NULL
+  - AST JSON Normalizado (no SQL):
+    ```json
+    {
+      "dataset": "tss",
+      "select": [{"expr": "tss.CEDULA", "alias": "cedula"}, ...],
+      "joins": [...],
+      "where": {"op": "and", "rules": [...]},
+      "orderBy": [{"field": "tss.FECHA", "dir": "desc"}],
+      "limit": 10
+    }
+    ```
+  - SQL Preview (solo lectura, generado por backend)
+  - Sistema de versionado: cada save crea nueva versión
+  - Panel lateral de versiones con activación
 - [x] Tema oscuro "Cyber-Swiss"
 
 ### Database

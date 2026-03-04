@@ -218,3 +218,67 @@ export async function testPreset(
     body: JSON.stringify({ cedula, params }),
   })
 }
+
+// Preset Versions
+export interface PresetVersionResponse {
+  id: number
+  presetId: number
+  version: number
+  astJson: string
+  isActive: boolean
+  createdBy: string
+  createdAt: string
+}
+
+export async function getPresetVersions(presetKey: string): Promise<ApiResponse<PresetVersionResponse[]>> {
+  return apiFetch<PresetVersionResponse[]>(`/api/admin/presets/${presetKey}/versions`)
+}
+
+export async function createPreset(request: {
+  presetKey: string
+  name: string
+  description?: string
+  dataset: string
+  ast: any
+}): Promise<ApiResponse<{ id: number; presetKey: string }>> {
+  return apiFetch<{ id: number; presetKey: string }>('/api/admin/presets', {
+    method: 'POST',
+    body: JSON.stringify(request),
+  })
+}
+
+export async function createPresetVersion(
+  presetId: number,
+  ast: any
+): Promise<ApiResponse<PresetVersionResponse>> {
+  return apiFetch<PresetVersionResponse>(`/api/admin/presets/${presetId}/versions`, {
+    method: 'POST',
+    body: JSON.stringify({ ast }),
+  })
+}
+
+export async function activatePresetVersion(
+  presetId: number,
+  versionId: number
+): Promise<ApiResponse<{ message: string }>> {
+  return apiFetch<{ message: string }>(`/api/admin/presets/${presetId}/versions/${versionId}/activate`, {
+    method: 'POST',
+  })
+}
+
+export async function compileAstToSql(ast: any): Promise<ApiResponse<{ sql: string }>> {
+  return apiFetch<{ sql: string }>('/api/admin/compile-ast', {
+    method: 'POST',
+    body: JSON.stringify({ ast }),
+  })
+}
+
+export async function testAst(
+  ast: any,
+  cedula: string
+): Promise<ApiResponse<TestPresetResponse>> {
+  return apiFetch<TestPresetResponse>('/api/admin/test-ast', {
+    method: 'POST',
+    body: JSON.stringify({ ast, cedula }),
+  })
+}

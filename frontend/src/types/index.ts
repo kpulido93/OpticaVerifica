@@ -42,6 +42,7 @@ export interface PresetInput {
   default?: any
 }
 
+// Legacy AST format (for hardcoded presets)
 export interface PresetAst {
   type: 'HARDCODED' | 'CUSTOM'
   handler?: string
@@ -93,6 +94,68 @@ export interface AstInput {
   type: string
   required: boolean
   default?: any
+}
+
+// ==============================================
+// Normalized AST Format (for Preset Designer)
+// ==============================================
+
+export type DataType = 'string' | 'number' | 'date' | 'boolean' | 'unknown'
+
+export interface NormalizedAst {
+  dataset: string
+  select: SelectColumn[]
+  joins: JoinClause[]
+  where: FilterGroup | null
+  orderBy: OrderByClause[]
+  limit: number
+}
+
+export interface SelectColumn {
+  id: string
+  expr: string // "table.column"
+  alias: string
+  sourceTable: string
+  sourceColumn: string
+  dataType: DataType
+}
+
+export interface JoinClause {
+  id: string
+  joinType: 'INNER' | 'LEFT' | 'RIGHT'
+  table: string
+  onLeft: string
+  onRight: string
+}
+
+export interface FilterGroup {
+  id: string
+  op: 'and' | 'or'
+  rules: (FilterRule | FilterGroup)[]
+}
+
+export interface FilterRule {
+  id: string
+  field: string // "table.column"
+  operator: string
+  value: any
+  dataType: DataType
+}
+
+export interface OrderByClause {
+  id: string
+  field: string
+  dir: 'asc' | 'desc'
+}
+
+export interface PresetVersion {
+  id: number
+  presetId: number
+  version: number
+  astJson: string
+  isActive: boolean
+  createdBy: string
+  createdAt: string
 }
 
 export interface SchemaResponse {

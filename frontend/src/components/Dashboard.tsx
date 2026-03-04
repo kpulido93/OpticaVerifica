@@ -119,7 +119,7 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
                 className="hidden"
                 data-testid="file-upload-input"
               />
-              <Button variant="secondary" size="sm" as="span" data-testid="upload-file-btn">
+              <Button variant="secondary" size="sm" data-testid="upload-file-btn">
                 <Upload className="w-4 h-4 mr-2" />
                 Cargar Archivo
               </Button>

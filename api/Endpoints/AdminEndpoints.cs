@@ -51,6 +51,16 @@ public static class AdminEndpoints
         group.MapPost("/compile-ast", CompileAst)
             .WithName("CompileAst")
             .WithSummary("Compile an AST to SQL (preview only)");
+
+        // Test AST directly endpoint
+        group.MapPost("/test-ast", TestAstDirect)
+            .WithName("TestAstDirect")
+            .WithSummary("Test an AST directly with a cedula");
+
+        // Activate version endpoint
+        group.MapPost("/presets/{presetId:int}/versions/{versionId:int}/activate", ActivateVersion)
+            .WithName("ActivateVersion")
+            .WithSummary("Activate a specific version of a preset");
     }
 
     private static async Task<IResult> GetSchema(
@@ -225,6 +235,154 @@ public static class AdminEndpoints
         }
     }
 
+    private static IResult TestAstDirect(
+        [FromBody] TestAstRequest request)
+    {
+        try
+        {
+            // Compile normalized AST to SQL preview
+            var sql = CompileNormalizedAstToSql(request.Ast, request.Cedula);
+            
+            return Results.Ok(new TestPresetResponse
+            {
+                Success = true,
+                GeneratedSql = sql,
+                Results = new List<Dictionary<string, object>>(),
+                ExecutionTimeMs = 0
+            });
+        }
+        catch (Exception ex)
+        {
+            return Results.Ok(new TestPresetResponse
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            });
+        }
+    }
+
+    private static async Task<IResult> ActivateVersion(
+        int presetId,
+        int versionId,
+        [FromServices] IDbConnectionFactory dbFactory)
+    {
+        using var conn = dbFactory.CreateConnection();
+
+        // Deactivate all versions for this preset
+        await Dapper.SqlMapper.ExecuteAsync(conn,
+            "UPDATE preset_versions SET is_active = 0 WHERE preset_id = @PresetId",
+            new { PresetId = presetId });
+
+        // Activate the specified version
+        var affected = await Dapper.SqlMapper.ExecuteAsync(conn,
+            "UPDATE preset_versions SET is_active = 1 WHERE preset_id = @PresetId AND id = @VersionId",
+            new { PresetId = presetId, VersionId = versionId });
+
+        if (affected == 0)
+        {
+            return Results.NotFound(new { error = "Version not found" });
+        }
+
+        return Results.Ok(new { message = "Version activated successfully" });
+    }
+
+    private static string CompileNormalizedAstToSql(NormalizedAst ast, string cedula)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // SELECT
+        sb.Append("SELECT\n");
+        if (ast.Select.Count == 0)
+        {
+            sb.Append("  *");
+        }
+        else
+        {
+            sb.Append(string.Join(",\n", ast.Select.Select(c => $"  {c.Expr} AS \"{c.Alias}\"")));
+        }
+
+        // FROM (infer from first selected column)
+        var mainTable = ast.Select.FirstOrDefault()?.SourceTable ?? "unknown";
+        sb.Append($"\nFROM {mainTable}");
+
+        // JOINs
+        foreach (var join in ast.Joins)
+        {
+            sb.Append($"\n{join.JoinType} JOIN {join.Table} ON {join.OnLeft} = {join.OnRight}");
+        }
+
+        // WHERE
+        if (ast.Where != null && ast.Where.Rules.Count > 0)
+        {
+            sb.Append("\nWHERE ");
+            sb.Append(CompileFilterGroup(ast.Where, cedula));
+        }
+
+        // ORDER BY
+        if (ast.OrderBy.Count > 0)
+        {
+            sb.Append("\nORDER BY ");
+            sb.Append(string.Join(", ", ast.OrderBy.Select(o => $"{o.Field} {o.Dir.ToUpper()}")));
+        }
+
+        // LIMIT
+        sb.Append($"\nLIMIT {ast.Limit}");
+
+        return sb.ToString();
+    }
+
+    private static string CompileFilterGroup(NormalizedFilterGroup group, string cedula)
+    {
+        var parts = new List<string>();
+
+        foreach (var ruleObj in group.Rules)
+        {
+            if (ruleObj is Newtonsoft.Json.Linq.JObject jObj)
+            {
+                if (jObj.ContainsKey("op") && jObj.ContainsKey("rules"))
+                {
+                    var subGroup = jObj.ToObject<NormalizedFilterGroup>();
+                    if (subGroup != null)
+                    {
+                        parts.Add($"({CompileFilterGroup(subGroup, cedula)})");
+                    }
+                }
+                else if (jObj.ContainsKey("field"))
+                {
+                    var rule = jObj.ToObject<NormalizedFilterRule>();
+                    if (rule != null)
+                    {
+                        parts.Add(CompileFilterRule(rule, cedula));
+                    }
+                }
+            }
+        }
+
+        return string.Join($" {group.Op.ToUpper()} ", parts);
+    }
+
+    private static string CompileFilterRule(NormalizedFilterRule rule, string cedula)
+    {
+        return rule.Operator switch
+        {
+            "in_ids" => $"{rule.Field} IN (@ids)",
+            "is_null" => $"{rule.Field} IS NULL",
+            "is_not_null" => $"{rule.Field} IS NOT NULL",
+            "between" when rule.Value is Newtonsoft.Json.Linq.JArray arr => 
+                $"{rule.Field} BETWEEN '{arr[0]}' AND '{arr[1]}'",
+            "in" when rule.Value is Newtonsoft.Json.Linq.JArray arr => 
+                $"{rule.Field} IN ({string.Join(", ", arr.Select(v => $"'{v}'"))})",
+            "like" => $"{rule.Field} LIKE '%{rule.Value}%'",
+            "eq" => $"{rule.Field} = '{rule.Value}'",
+            "neq" => $"{rule.Field} != '{rule.Value}'",
+            "gt" => $"{rule.Field} > '{rule.Value}'",
+            "gte" => $"{rule.Field} >= '{rule.Value}'",
+            "lt" => $"{rule.Field} < '{rule.Value}'",
+            "lte" => $"{rule.Field} <= '{rule.Value}'",
+            _ => $"{rule.Field} = '{rule.Value}'"
+        };
+    }
+
     private static async Task<List<string>> ValidateAst(PresetAst ast, string dataset, ISchemaService schemaService)
     {
         var errors = new List<string>();
@@ -319,4 +477,63 @@ public class CreateVersionRequest
 public class CompileAstRequest
 {
     public PresetAst Ast { get; set; } = new();
+}
+
+public class TestAstRequest
+{
+    public NormalizedAst Ast { get; set; } = new();
+    public string Cedula { get; set; } = string.Empty;
+}
+
+// Normalized AST format (from Preset Designer)
+public class NormalizedAst
+{
+    public string Dataset { get; set; } = string.Empty;
+    public List<NormalizedSelectColumn> Select { get; set; } = new();
+    public List<NormalizedJoin> Joins { get; set; } = new();
+    public NormalizedFilterGroup? Where { get; set; }
+    public List<NormalizedOrderBy> OrderBy { get; set; } = new();
+    public int Limit { get; set; } = 100;
+}
+
+public class NormalizedSelectColumn
+{
+    public string Id { get; set; } = string.Empty;
+    public string Expr { get; set; } = string.Empty;
+    public string Alias { get; set; } = string.Empty;
+    public string SourceTable { get; set; } = string.Empty;
+    public string SourceColumn { get; set; } = string.Empty;
+    public string DataType { get; set; } = "unknown";
+}
+
+public class NormalizedJoin
+{
+    public string Id { get; set; } = string.Empty;
+    public string JoinType { get; set; } = "INNER";
+    public string Table { get; set; } = string.Empty;
+    public string OnLeft { get; set; } = string.Empty;
+    public string OnRight { get; set; } = string.Empty;
+}
+
+public class NormalizedFilterGroup
+{
+    public string Id { get; set; } = string.Empty;
+    public string Op { get; set; } = "and"; // "and" | "or"
+    public List<object> Rules { get; set; } = new(); // FilterRule or FilterGroup
+}
+
+public class NormalizedFilterRule
+{
+    public string Id { get; set; } = string.Empty;
+    public string Field { get; set; } = string.Empty;
+    public string Operator { get; set; } = "eq";
+    public object? Value { get; set; }
+    public string DataType { get; set; } = "unknown";
+}
+
+public class NormalizedOrderBy
+{
+    public string Id { get; set; } = string.Empty;
+    public string Field { get; set; } = string.Empty;
+    public string Dir { get; set; } = "asc";
 }
