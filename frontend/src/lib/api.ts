@@ -164,6 +164,42 @@ export async function cancelJob(jobId: string): Promise<ApiResponse<{ message: s
   })
 }
 
+
+export interface ParseIdsResponse {
+  headers: string[]
+  suggestedColumn: string
+  selectedColumn: string
+  sampleRows: Record<string, string>[]
+  ids: string[]
+  totalRows: number
+}
+
+export async function parseIdsFile(file: File, selectedColumn?: string): Promise<ApiResponse<ParseIdsResponse>> {
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (selectedColumn) formData.append('selectedColumn', selectedColumn)
+
+    const response = await fetch(`${API_URL}/api/ids/parse`, {
+      method: 'POST',
+      headers: {
+        'Authorization': getAuthHeader(),
+      },
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      return { error: errorData.error || `Error ${response.status}` }
+    }
+
+    const data = await response.json()
+    return { data }
+  } catch {
+    return { error: 'Error de conexión' }
+  }
+}
+
 // Admin
 export interface SchemaResponse {
   dataset: string
@@ -194,6 +230,10 @@ export interface AllowedOperator {
 
 export async function getSchema(dataset: string): Promise<ApiResponse<SchemaResponse>> {
   return apiFetch<SchemaResponse>(`/api/admin/schema/${dataset}`)
+}
+
+export async function getDefaultSchema(): Promise<ApiResponse<SchemaResponse>> {
+  return apiFetch<SchemaResponse>('/api/admin/schema')
 }
 
 export async function getDatasets(): Promise<ApiResponse<{ key: string; name: string }[]>> {
@@ -266,10 +306,10 @@ export async function activatePresetVersion(
   })
 }
 
-export async function compileAstToSql(ast: any): Promise<ApiResponse<{ sql: string }>> {
-  return apiFetch<{ sql: string }>('/api/admin/compile-ast', {
+export async function compileAstToSql(ast: any, dataset?: string): Promise<ApiResponse<{ sql: string; params?: Record<string, any> }>> {
+  return apiFetch<{ sql: string; params?: Record<string, any> }>('/api/admin/presets/compile', {
     method: 'POST',
-    body: JSON.stringify({ ast }),
+    body: JSON.stringify({ ast, dataset }),
   })
 }
 

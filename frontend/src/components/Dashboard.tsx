@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'sonner'
 import { Upload, FileText, Play, RefreshCw, Zap } from 'lucide-react'
-import { getPresets, createJob, Preset } from '@/lib/api'
+import { getPresets, createJob, parseIdsFile, Preset } from '@/lib/api'
 import { parseCedulas } from '@/lib/utils'
 import Button from './ui/Button'
 import Card from './ui/Card'
@@ -18,7 +18,14 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
   const [cedulasText, setCedulasText] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingPresets, setIsLoadingPresets] = useState(true)
+  const [isParsingFile, setIsParsingFile] = useState(false)
   const [params, setParams] = useState<Record<string, any>>({})
+
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [fileHeaders, setFileHeaders] = useState<string[]>([])
+  const [selectedFileColumn, setSelectedFileColumn] = useState('')
+  const [fileIds, setFileIds] = useState<string[]>([])
+  const [fileSampleRows, setFileSampleRows] = useState<Record<string, string>[]>([])
 
   const loadPresets = useCallback(async () => {
     setIsLoadingPresets(true)
@@ -39,31 +46,54 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
   }, [loadPresets])
 
   const selectedPresetData = presets.find(p => p.presetKey === selectedPreset)
+  const manualIds = parseCedulas(cedulasText)
+  const finalCedulas = Array.from(new Set([...fileIds, ...manualIds]))
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const parseFile = async (file: File, column?: string) => {
+    setIsParsingFile(true)
+    const { data, error } = await parseIdsFile(file, column)
+
+    if (error || !data) {
+      toast.error(error || 'No se pudo procesar el archivo')
+      setIsParsingFile(false)
+      return
+    }
+
+    setFileHeaders(data.headers)
+    setSelectedFileColumn(data.selectedColumn)
+    setFileIds(data.ids)
+    setFileSampleRows(data.sampleRows)
+
+    toast.success(`${data.ids.length} cédulas cargadas desde archivo`)
+    setIsParsingFile(false)
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    const reader = new FileReader()
-    reader.onload = (event) => {
-      const text = event.target?.result as string
-      // Simple CSV/text parsing - extract first column values
-      const lines = text.split('\n')
-      const values = lines
-        .map(line => line.split(',')[0]?.trim())
-        .filter(v => v && v.length > 0)
-      setCedulasText(values.join('\n'))
-      toast.success(`${values.length} cédulas cargadas`)
-    }
-    reader.readAsText(file)
-    e.target.value = '' // Reset input
+    setUploadedFile(file)
+    await parseFile(file)
+    e.target.value = ''
+  }
+
+  const handleColumnChange = async (column: string) => {
+    setSelectedFileColumn(column)
+    if (!uploadedFile) return
+    await parseFile(uploadedFile, column)
+  }
+
+  const clearFileData = () => {
+    setUploadedFile(null)
+    setFileHeaders([])
+    setSelectedFileColumn('')
+    setFileIds([])
+    setFileSampleRows([])
   }
 
   const handleSubmit = async () => {
-    const cedulas = parseCedulas(cedulasText)
-    
-    if (cedulas.length === 0) {
-      toast.error('Ingresa al menos una cédula')
+    if (finalCedulas.length === 0) {
+      toast.error('Ingresa al menos una cédula (archivo o manual)')
       return
     }
 
@@ -76,16 +106,17 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
 
     const { data, error } = await createJob({
       presetKey: selectedPreset,
-      cedulas,
+      cedulas: finalCedulas,
       params: Object.keys(params).length > 0 ? params : undefined,
     })
 
     if (error) {
       toast.error(error)
     } else if (data) {
-      toast.success(`Job creado con ${cedulas.length} cédulas`)
+      toast.success(`Job creado con ${finalCedulas.length} cédulas`)
       setCedulasText('')
       setParams({})
+      clearFileData()
       onJobCreated(data.id)
     }
 
@@ -114,34 +145,68 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
             <label className="cursor-pointer">
               <input
                 type="file"
-                accept=".csv,.txt"
+                accept=".csv,.xlsx"
                 onChange={handleFileUpload}
                 className="hidden"
                 data-testid="file-upload-input"
               />
-              <Button variant="secondary" size="sm" data-testid="upload-file-btn">
+              <Button variant="secondary" size="sm" data-testid="upload-file-btn" isLoading={isParsingFile}>
                 <Upload className="w-4 h-4 mr-2" />
-                Cargar Archivo
+                Cargar CSV/XLSX
               </Button>
             </label>
           </div>
 
+          {uploadedFile && (
+            <div className="mb-4 p-3 rounded-lg border border-zinc-700 bg-zinc-900/50 space-y-3" data-testid="file-parse-card">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-zinc-300">Archivo: <strong>{uploadedFile.name}</strong></span>
+                <button onClick={clearFileData} className="text-xs text-zinc-400 hover:text-white">Quitar archivo</button>
+              </div>
+
+              {fileHeaders.length > 0 && (
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Columna de Cédula</label>
+                  <select
+                    value={selectedFileColumn}
+                    onChange={(e) => handleColumnChange(e.target.value)}
+                    className="w-full h-9 px-3 bg-zinc-950 border border-zinc-700 rounded-md text-white text-sm"
+                    data-testid="cedula-column-select"
+                  >
+                    {fileHeaders.map((header) => (
+                      <option key={header} value={header}>{header}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {fileSampleRows.length > 0 && (
+                <div className="text-xs text-zinc-400">
+                  <p className="mb-1">Muestra:</p>
+                  <pre className="p-2 bg-zinc-950 rounded border border-zinc-800 overflow-x-auto max-h-28">{JSON.stringify(fileSampleRows.slice(0, 3), null, 2)}</pre>
+                </div>
+              )}
+            </div>
+          )}
+
           <textarea
             value={cedulasText}
             onChange={(e) => setCedulasText(e.target.value)}
-            placeholder="Pega las cédulas aquí, una por línea o separadas por comas..."
+            placeholder="Alternativa manual: pega cédulas aquí (una por línea, coma o punto y coma)..."
             className="w-full h-64 p-4 bg-zinc-900 border border-zinc-700 rounded-lg text-white placeholder:text-zinc-500 font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
             data-testid="cedulas-textarea"
           />
 
           <div className="mt-3 flex items-center justify-between text-sm text-zinc-400">
-            <span>{parseCedulas(cedulasText).length} cédulas únicas</span>
-            <button 
+            <span>
+              Archivo: {fileIds.length} | Manual: {manualIds.length} | Total final: {finalCedulas.length}
+            </span>
+            <button
               onClick={() => setCedulasText('')}
               className="hover:text-white transition-colors"
               data-testid="clear-cedulas-btn"
             >
-              Limpiar
+              Limpiar manual
             </button>
           </div>
         </Card>
@@ -153,7 +218,7 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
               <Zap className="w-5 h-5 text-accent" />
               Preset
             </h2>
-            <button 
+            <button
               onClick={loadPresets}
               className="text-zinc-400 hover:text-white transition-colors"
               data-testid="refresh-presets-btn"
@@ -218,7 +283,7 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
             onClick={handleSubmit}
             className="w-full mt-4"
             isLoading={isLoading}
-            disabled={parseCedulas(cedulasText).length === 0 || !selectedPreset}
+            disabled={finalCedulas.length === 0 || !selectedPreset}
             data-testid="execute-job-btn"
           >
             <Play className="w-4 h-4 mr-2" />
