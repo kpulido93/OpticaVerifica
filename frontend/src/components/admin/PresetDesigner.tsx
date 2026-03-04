@@ -27,7 +27,19 @@ import {
   FolderTree, Edit2, Check, X, Copy, History, ToggleLeft, ToggleRight,
   Link2, Hash, Calendar, Type, CircleDot
 } from 'lucide-react'
-import { getSchema, getDatasets, SchemaResponse, TableSchema, ColumnSchema } from '@/lib/api'
+import {
+  getSchema,
+  getDatasets,
+  SchemaResponse,
+  TableSchema,
+  ColumnSchema,
+  createPreset,
+  createPresetVersion,
+  getPresetVersions,
+  activatePresetVersion,
+  compileAstToSql,
+  testPreset,
+} from '@/lib/api'
 import Card from '../ui/Card'
 import Button from '../ui/Button'
 
@@ -556,6 +568,8 @@ export default function PresetDesigner() {
   const [testResults, setTestResults] = useState<any>(null)
   const [isTesting, setIsTesting] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isCompiling, setIsCompiling] = useState(false)
+  const [compileError, setCompileError] = useState<string | null>(null)
 
   // Drag state
   const [activeId, setActiveId] = useState<string | null>(null)
@@ -693,79 +707,64 @@ export default function PresetDesigner() {
     }
   }
 
-  // Generate SQL preview (this would be done by backend in production)
-  const generateSqlPreview = useCallback(() => {
+  const toBackendAst = useCallback(() => {
     const ast = buildAst()
-    let sql = 'SELECT\n'
 
-    if (ast.select.length === 0) {
-      sql += '  *'
-    } else {
-      sql += ast.select.map(c => `  ${c.expr} AS "${c.alias}"`).join(',\n')
+    const mapFilterGroup = (group: FilterGroup) => {
+      const filtersOnly = group.rules.filter((r) => !('op' in r && 'rules' in r)) as FilterRule[]
+      const groupsOnly = group.rules.filter((r) => 'op' in r && 'rules' in r) as FilterGroup[]
+
+      return {
+        logic: group.op.toUpperCase(),
+        filters: filtersOnly.map((rule) => {
+          const [table, column] = rule.field.split('.')
+          return { table, column, operator: rule.operator, value: rule.value }
+        }),
+        groups: groupsOnly.map(mapFilterGroup),
+      }
     }
 
-    // Determine main table
-    const mainTable = ast.select.length > 0 ? ast.select[0].sourceTable : schema?.tables[0]?.tableName || 'unknown'
-    sql += `\nFROM ${mainTable}`
-
-    // Joins
-    ast.joins.forEach(j => {
-      sql += `\n${j.joinType} JOIN ${j.table} ON ${j.onLeft} = ${j.onRight}`
-    })
-
-    // Where
-    if (ast.where && ast.where.rules.length > 0) {
-      sql += '\nWHERE '
-      sql += formatFilterGroup(ast.where)
+    return {
+      type: 'CUSTOM',
+      select: ast.select.map((c) => ({
+        table: c.sourceTable,
+        column: c.sourceColumn,
+        alias: c.alias,
+      })),
+      fromTable: ast.select[0]?.sourceTable ?? schema?.tables[0]?.tableName,
+      joins: ast.joins.map((j) => ({
+        joinType: j.joinType,
+        table: j.table,
+        onLeft: j.onLeft,
+        onRight: j.onRight,
+      })),
+      where: ast.where ? mapFilterGroup(ast.where) : null,
+      orderBy: ast.orderBy.map((o) => {
+        const [table, column] = o.field.split('.')
+        return { table, column, direction: o.dir.toUpperCase() }
+      }),
+      limit: ast.limit,
+      inputs: [{ name: 'cedula', type: 'string', required: true }],
     }
-
-    // Order by
-    if (ast.orderBy.length > 0) {
-      sql += '\nORDER BY '
-      sql += ast.orderBy.map(o => `${o.field} ${o.dir.toUpperCase()}`).join(', ')
-    }
-
-    // Limit
-    sql += `\nLIMIT ${ast.limit}`
-
-    return sql
-  }, [selectedColumns, joins, filters, orderBy, limit, selectedDataset, schema])
-
-  const formatFilterGroup = (group: FilterGroup): string => {
-    const parts = group.rules.map(rule => {
-      if ('op' in rule && 'rules' in rule) {
-        return `(${formatFilterGroup(rule as FilterGroup)})`
-      }
-      const r = rule as FilterRule
-      const ops = OPERATORS_BY_TYPE[r.dataType]
-      const op = ops.find(o => o.key === r.operator)
-      
-      if (r.operator === 'in_ids') {
-        return `${r.field} IN (@ids)`
-      }
-      if (r.operator === 'is_null') {
-        return `${r.field} IS NULL`
-      }
-      if (r.operator === 'is_not_null') {
-        return `${r.field} IS NOT NULL`
-      }
-      if (r.operator === 'between' && Array.isArray(r.value)) {
-        return `${r.field} BETWEEN '${r.value[0]}' AND '${r.value[1]}'`
-      }
-      if (r.operator === 'in' && Array.isArray(r.value)) {
-        return `${r.field} IN (${r.value.map(v => `'${v}'`).join(', ')})`
-      }
-      if (r.operator === 'like') {
-        return `${r.field} LIKE '%${r.value}%'`
-      }
-      return `${r.field} ${op?.sql || '='} '${r.value}'`
-    })
-    return parts.join(` ${group.op.toUpperCase()} `)
-  }
+  }, [buildAst, schema])
 
   useEffect(() => {
-    setSqlPreview(generateSqlPreview())
-  }, [generateSqlPreview])
+    const compile = async () => {
+      if (!selectedDataset) return
+      setIsCompiling(true)
+      const { data, error } = await compileAstToSql(toBackendAst(), selectedDataset)
+      if (error) {
+        setSqlPreview('')
+        setCompileError(error)
+      } else {
+        setSqlPreview(data?.sql || '')
+        setCompileError(null)
+      }
+      setIsCompiling(false)
+    }
+
+    compile()
+  }, [selectedColumns, joins, filters, orderBy, limit, selectedDataset, toBackendAst])
 
   // Save preset (creates new version)
   const handleSave = async () => {
@@ -779,30 +778,51 @@ export default function PresetDesigner() {
     }
 
     setIsSaving(true)
-    const ast = buildAst()
-
     try {
-      // In production, this would call the API
-      console.log('Saving preset:', {
-        presetKey,
-        name: presetName,
-        description: presetDescription,
-        dataset: selectedDataset,
-        ast: JSON.stringify(ast, null, 2),
-      })
+      const backendAst = toBackendAst()
+      let currentPresetId = presetId
 
-      // Simulate version creation
-      const newVersion: PresetVersion = {
-        id: versions.length + 1,
-        version: versions.length + 1,
-        astJson: JSON.stringify(ast),
-        isActive: true,
-        createdBy: 'admin',
-        createdAt: new Date().toISOString(),
+      if (!currentPresetId) {
+        const createResp = await createPreset({
+          presetKey,
+          name: presetName,
+          description: presetDescription,
+          dataset: selectedDataset,
+          ast: backendAst,
+        })
+
+        if (createResp.error || !createResp.data) {
+          toast.error(createResp.error || 'Error creando preset')
+          return
+        }
+
+        currentPresetId = createResp.data.id
+        setPresetId(createResp.data.id)
+      } else {
+        const versionResp = await createPresetVersion(currentPresetId, backendAst)
+        if (versionResp.error) {
+          toast.error(versionResp.error)
+          return
+        }
       }
-      setVersions(prev => [...prev.map(v => ({ ...v, isActive: false })), newVersion])
-      
-      toast.success(`Preset guardado - Versión ${newVersion.version}`)
+
+      const versionsResp = await getPresetVersions(presetKey)
+      if (versionsResp.error || !versionsResp.data) {
+        toast.error(versionsResp.error || 'No se pudieron cargar versiones')
+        return
+      }
+
+      setVersions(versionsResp.data.map(v => ({
+        id: v.id,
+        version: v.version,
+        astJson: v.astJson,
+        isActive: v.isActive,
+        createdBy: v.createdBy,
+        createdAt: v.createdAt,
+      })))
+
+      const activeVersion = versionsResp.data.find(v => v.isActive)
+      toast.success(`Preset guardado${activeVersion ? ` - Versión ${activeVersion.version}` : ''}`)
     } catch (error) {
       toast.error('Error guardando preset')
     } finally {
@@ -811,7 +831,18 @@ export default function PresetDesigner() {
   }
 
   // Activate version
-  const activateVersion = (versionId: number) => {
+  const activateVersion = async (versionId: number) => {
+    if (!presetId) {
+      toast.error('Guarda el preset antes de activar versiones')
+      return
+    }
+
+    const resp = await activatePresetVersion(presetId, versionId)
+    if (resp.error) {
+      toast.error(resp.error)
+      return
+    }
+
     setVersions(versions.map(v => ({ ...v, isActive: v.id === versionId })))
     const version = versions.find(v => v.id === versionId)
     if (version) {
@@ -846,15 +877,36 @@ export default function PresetDesigner() {
 
     setIsTesting(true)
     try {
-      // In production, this would call the backend to compile and execute
-      const ast = buildAst()
-      setTestResults({
-        success: true,
-        ast,
-        sql: sqlPreview,
-        message: 'Vista previa generada (backend compila el SQL real)'
-      })
-      toast.info('Vista previa del AST generada')
+      let response
+      if (presetKey && presetId) {
+        response = await testPreset(presetKey, testCedula)
+      } else {
+        const { data, error } = await compileAstToSql(toBackendAst(), selectedDataset)
+        if (error) {
+          toast.error(error)
+          return
+        }
+        response = {
+          data: {
+            success: true,
+            generatedSql: data?.sql,
+            results: [],
+            executionTimeMs: 0,
+          }
+        }
+      }
+
+      if (response.error || !response.data) {
+        toast.error(response.error || 'Error ejecutando prueba')
+        return
+      }
+
+      setTestResults(response.data)
+      if (response.data.success) {
+        toast.success('Prueba ejecutada correctamente')
+      } else {
+        toast.error(response.data.errorMessage || 'Prueba fallida')
+      }
     } finally {
       setIsTesting(false)
     }
@@ -1178,7 +1230,11 @@ export default function PresetDesigner() {
                 </h3>
               </div>
               <pre className="p-4 bg-zinc-950 rounded-lg overflow-x-auto text-sm font-mono text-zinc-300 border border-zinc-800">
-                {sqlPreview || '-- Selecciona columnas para generar preview'}
+                {isCompiling
+                  ? '-- Compilando SQL desde backend...'
+                  : compileError
+                  ? `-- Error al compilar: ${compileError}`
+                  : sqlPreview || '-- Selecciona columnas para generar preview'}
               </pre>
             </Card>
 

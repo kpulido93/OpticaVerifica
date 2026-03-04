@@ -14,6 +14,10 @@ public static class AdminEndpoints
             .WithTags("Admin");
 
         // Schema endpoints
+        group.MapGet("/schema", GetDefaultSchema)
+            .WithName("GetDefaultSchema")
+            .WithSummary("Get allowed schema for default dataset");
+
         group.MapGet("/schema/{dataset}", GetSchema)
             .WithName("GetSchema")
             .WithSummary("Get allowed schema (tables, columns, operators) for a dataset");
@@ -48,9 +52,13 @@ public static class AdminEndpoints
             .WithSummary("Test a preset with a sample cedula");
 
         // AST Compiler endpoint
-        group.MapPost("/compile-ast", CompileAst)
+        group.MapPost("/presets/compile", CompileAst)
             .WithName("CompileAst")
             .WithSummary("Compile an AST to SQL (preview only)");
+
+        group.MapPost("/compile-ast", CompileAst)
+            .WithName("CompileAstLegacy")
+            .WithSummary("Compile an AST to SQL (legacy route)");
 
         // Test AST directly endpoint
         group.MapPost("/test-ast", TestAstDirect)
@@ -68,6 +76,12 @@ public static class AdminEndpoints
         [FromServices] ISchemaService schemaService)
     {
         var schema = await schemaService.GetAllowedSchemaAsync(dataset);
+        return Results.Ok(schema);
+    }
+
+    private static async Task<IResult> GetDefaultSchema([FromServices] ISchemaService schemaService)
+    {
+        var schema = await schemaService.GetAllowedSchemaAsync("neon_templaris");
         return Results.Ok(schema);
     }
 
@@ -220,14 +234,22 @@ public static class AdminEndpoints
         }
     }
 
-    private static IResult CompileAst(
+    private static async Task<IResult> CompileAst(
         [FromBody] CompileAstRequest request,
-        [FromServices] IPresetExecutor executor)
+        [FromServices] IPresetExecutor executor,
+        [FromServices] ISchemaService schemaService)
     {
         try
         {
+            var dataset = string.IsNullOrWhiteSpace(request.Dataset) ? "neon_templaris" : request.Dataset;
+            var validationErrors = await ValidateAst(request.Ast, dataset, schemaService);
+            if (validationErrors.Count > 0)
+            {
+                return Results.BadRequest(new { errors = validationErrors });
+            }
+
             var sql = executor.CompileAstToSql(request.Ast, "@cedula_placeholder", null, out _);
-            return Results.Ok(new { sql });
+            return Results.Ok(new { sql, @params = new { cedula = "@cedula_placeholder" } });
         }
         catch (Exception ex)
         {
@@ -476,6 +498,7 @@ public class CreateVersionRequest
 
 public class CompileAstRequest
 {
+    public string? Dataset { get; set; }
     public PresetAst Ast { get; set; } = new();
 }
 
