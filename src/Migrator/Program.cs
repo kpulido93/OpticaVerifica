@@ -1,9 +1,9 @@
 using DbUp;
 
 var connectionString =
-    Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
-    ?? Environment.GetEnvironmentVariable("CONNECTION_STRING")
-    ?? throw new InvalidOperationException("Missing connection string. Set ConnectionStrings__DefaultConnection or CONNECTION_STRING.");
+    ResolveConnectionString()
+    ?? throw new InvalidOperationException(
+        "Missing connection string. Set ConnectionStrings__DefaultConnection, ConnectionStrings:DefaultConnection, CONNECTION_STRING, or MYSQL_HOST/MYSQL_PORT/MYSQL_DATABASE/MYSQL_USER/MYSQL_PASSWORD.");
 
 var migrationsPath = Environment.GetEnvironmentVariable("MIGRATIONS_PATH") ?? "/db/migrations";
 
@@ -35,3 +35,32 @@ if (!result.Successful)
 
 Console.WriteLine("Migrations applied successfully.");
 return 0;
+
+static string? ResolveConnectionString()
+{
+    var directConnection =
+        Environment.GetEnvironmentVariable("ConnectionStrings__DefaultConnection")
+        ?? Environment.GetEnvironmentVariable("ConnectionStrings:DefaultConnection")
+        ?? Environment.GetEnvironmentVariable("CONNECTION_STRING");
+
+    if (!string.IsNullOrWhiteSpace(directConnection))
+    {
+        return directConnection;
+    }
+
+    var host = Environment.GetEnvironmentVariable("MYSQL_HOST");
+    var port = Environment.GetEnvironmentVariable("MYSQL_PORT") ?? "3306";
+    var database = Environment.GetEnvironmentVariable("MYSQL_DATABASE");
+    var user = Environment.GetEnvironmentVariable("MYSQL_USER");
+    var password = Environment.GetEnvironmentVariable("MYSQL_PASSWORD");
+
+    if (!string.IsNullOrWhiteSpace(host)
+        && !string.IsNullOrWhiteSpace(database)
+        && !string.IsNullOrWhiteSpace(user)
+        && password is not null)
+    {
+        return $"Server={host};Port={port};Database={database};User={user};Password={password};";
+    }
+
+    return null;
+}
