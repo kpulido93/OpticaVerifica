@@ -39,7 +39,7 @@ Variables de autenticación esperadas en `.env`:
 - `AUTH_READER_USER` -> `Auth__ReaderUser`
 - `AUTH_READER_PASSWORD` -> `Auth__ReaderPassword`
 
-## Configuración de entorno
+## ENV
 
 Usa `.env.example` como base. Incluye, entre otras, estas variables:
 
@@ -50,6 +50,18 @@ Usa `.env.example` como base. Incluye, entre otras, estas variables:
 - `WORKER_MAX_CONCURRENT_JOBS`, `WORKER_BATCH_SIZE`, `WORKER_MAX_IDS_PER_JOB`
 - `CORS_ALLOWED_ORIGINS`
 - `RATE_LIMIT_PERMIT_LIMIT`, `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_QUEUE_LIMIT`
+
+Reglas de hardening en API:
+
+- `CORS_ALLOWED_ORIGINS` se interpreta como CSV (`https://app.example.com,https://admin.example.com`).
+- En `Development`, si no defines `CORS_ALLOWED_ORIGINS`, se permiten por defecto `http://localhost:3000` y `http://127.0.0.1:3000`.
+- Fuera de `Development`, la API falla al iniciar si no existe `CORS_ALLOWED_ORIGINS` (fail-fast).
+- Rate limit FixedWindow para rutas `/api/*`:
+  - `RATE_LIMIT_PERMIT_LIMIT` (default `60`).
+  - `RATE_LIMIT_WINDOW_SECONDS` (default `60`).
+  - `RATE_LIMIT_QUEUE_LIMIT` (default `0`).
+- Se habilitan `X-Forwarded-For` y `X-Forwarded-Proto` para despliegues detrás de proxy/reverse proxy.
+- Se aplica `UseHttpsRedirection()` fuera de `Development` y `UseHsts()` en `Production`.
 
 ## API
 

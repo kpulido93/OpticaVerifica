@@ -1,13 +1,21 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
 using OptimaVerifica.Api.Auth;
-using OptimaVerifica.Api.Services;
 using OptimaVerifica.Api.Endpoints;
+using OptimaVerifica.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Configuration
 builder.Configuration.AddEnvironmentVariables();
+
+var corsOrigins = ResolveCorsOrigins(builder.Configuration, builder.Environment);
+var rateLimitPermitLimit = ResolveIntSetting(builder.Configuration, "RATE_LIMIT_PERMIT_LIMIT", 60, 1);
+var rateLimitWindowSeconds = ResolveIntSetting(builder.Configuration, "RATE_LIMIT_WINDOW_SECONDS", 60, 1);
+var rateLimitQueueLimit = ResolveIntSetting(builder.Configuration, "RATE_LIMIT_QUEUE_LIMIT", 0, 0);
 
 // Services
 builder.Services.AddEndpointsApiExplorer();
@@ -65,16 +73,77 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.AllowAnyOrigin()
+        policy.WithOrigins(corsOrigins)
               .AllowAnyMethod()
               .AllowAnyHeader();
+    });
+});
+
+// Reverse proxy headers
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// Rate limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("ApiFixedWindow", context =>
+    {
+        var partitionKey = GetRateLimitPartitionKey(context);
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => CreateFixedWindowOptions(rateLimitPermitLimit, rateLimitWindowSeconds, rateLimitQueueLimit));
+    });
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    {
+        if (!context.Request.Path.StartsWithSegments("/api"))
+        {
+            return RateLimitPartition.GetNoLimiter("non-api");
+        }
+
+        var partitionKey = GetRateLimitPartitionKey(context);
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey,
+            _ => CreateFixedWindowOptions(rateLimitPermitLimit, rateLimitWindowSeconds, rateLimitQueueLimit));
     });
 });
 
 var app = builder.Build();
 
 // Middleware
+app.UseForwardedHeaders();
+
+if (app.Environment.IsProduction())
+{
+    app.UseHsts();
+}
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
+
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["X-Frame-Options"] = "DENY";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        return Task.CompletedTask;
+    });
+
+    await next();
+});
+
 app.UseCors("AllowFrontend");
+app.UseRateLimiter();
 
 if (app.Environment.IsDevelopment())
 {
@@ -93,3 +162,67 @@ app.MapIdsEndpoints();
 app.MapHealthEndpoints();
 
 app.Run();
+
+static string[] ResolveCorsOrigins(IConfiguration configuration, IHostEnvironment environment)
+{
+    var rawOrigins = configuration["CORS_ALLOWED_ORIGINS"];
+    if (!string.IsNullOrWhiteSpace(rawOrigins))
+    {
+        var parsedOrigins = rawOrigins
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(origin => origin.TrimEnd('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (parsedOrigins.Length > 0)
+        {
+            return parsedOrigins;
+        }
+    }
+
+    if (environment.IsDevelopment())
+    {
+        return
+        [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000"
+        ];
+    }
+
+    throw new InvalidOperationException(
+        "CORS_ALLOWED_ORIGINS is required outside Development. Set a CSV list of trusted origins, e.g. https://app.example.com,https://admin.example.com.");
+}
+
+static int ResolveIntSetting(IConfiguration configuration, string key, int defaultValue, int minValue)
+{
+    var rawValue = configuration[key];
+    if (string.IsNullOrWhiteSpace(rawValue))
+    {
+        return defaultValue;
+    }
+
+    if (int.TryParse(rawValue, out var parsedValue) && parsedValue >= minValue)
+    {
+        return parsedValue;
+    }
+
+    throw new InvalidOperationException($"{key} must be an integer greater than or equal to {minValue}.");
+}
+
+static string GetRateLimitPartitionKey(HttpContext context)
+{
+    var remoteIp = context.Connection.RemoteIpAddress?.ToString();
+    return string.IsNullOrWhiteSpace(remoteIp) ? "unknown" : remoteIp;
+}
+
+static FixedWindowRateLimiterOptions CreateFixedWindowOptions(int permitLimit, int windowSeconds, int queueLimit)
+{
+    return new FixedWindowRateLimiterOptions
+    {
+        PermitLimit = permitLimit,
+        Window = TimeSpan.FromSeconds(windowSeconds),
+        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+        QueueLimit = queueLimit,
+        AutoReplenishment = true
+    };
+}
