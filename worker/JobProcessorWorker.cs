@@ -12,6 +12,7 @@ public class JobProcessorWorker : BackgroundService
     private readonly string _connectionString;
     private readonly int _maxConcurrentJobs;
     private readonly int _batchSize;
+    private const int StatusCheckEveryItems = 10;
 
     public JobProcessorWorker(ILogger<JobProcessorWorker> logger, IConfiguration config)
     {
@@ -69,10 +70,26 @@ public class JobProcessorWorker : BackgroundService
 
         try
         {
-            // Update status to PROCESSING
-            await conn.ExecuteAsync(
-                "UPDATE jobs SET status = 'PROCESSING', started_at = NOW() WHERE id = @Id",
+            var claimedRows = await conn.ExecuteAsync(
+                @"UPDATE jobs
+                  SET status = 'PROCESSING', started_at = COALESCE(started_at, NOW())
+                  WHERE id = @Id AND status = 'PENDING'",
                 new { Id = job.Id });
+
+            if (claimedRows == 0)
+            {
+                _logger.LogInformation(
+                    "Skipping job {JobId}: could not claim as PENDING (already claimed or status changed).",
+                    job.Id);
+                return;
+            }
+
+            var initialControlAction = await CheckJobControlStatusAsync(conn, job.Id);
+            if (initialControlAction != JobControlAction.Continue)
+            {
+                _logger.LogInformation("Stopping job {JobId} before item processing due to status control.", job.Id);
+                return;
+            }
 
             // Get preset AST
             var presetAst = await GetPresetAstAsync(conn, job.PresetKey);
@@ -87,8 +104,16 @@ public class JobProcessorWorker : BackgroundService
                 : JsonConvert.DeserializeObject<Dictionary<string, object>>(job.ParamsJson);
 
             // Process items in batches
+            var itemsSinceLastControlCheck = 0;
             while (!stoppingToken.IsCancellationRequested)
             {
+                var controlAction = await CheckJobControlStatusAsync(conn, job.Id);
+                if (controlAction != JobControlAction.Continue)
+                {
+                    _logger.LogInformation("Stopping job {JobId} while processing due to status control.", job.Id);
+                    return;
+                }
+
                 var items = await conn.QueryAsync<JobItemInfo>(
                     @"SELECT id as Id, cedula as Cedula
                       FROM job_items
@@ -102,6 +127,20 @@ public class JobProcessorWorker : BackgroundService
                 foreach (var item in itemList)
                 {
                     if (stoppingToken.IsCancellationRequested) break;
+
+                    if (itemsSinceLastControlCheck >= StatusCheckEveryItems)
+                    {
+                        controlAction = await CheckJobControlStatusAsync(conn, job.Id);
+                        if (controlAction != JobControlAction.Continue)
+                        {
+                            _logger.LogInformation(
+                                "Stopping job {JobId} during batch due to status control.",
+                                job.Id);
+                            return;
+                        }
+
+                        itemsSinceLastControlCheck = 0;
+                    }
 
                     try
                     {
@@ -145,24 +184,142 @@ public class JobProcessorWorker : BackgroundService
                             "UPDATE jobs SET processed_items = processed_items + 1, failed_items = failed_items + 1 WHERE id = @Id",
                             new { Id = job.Id });
                     }
+
+                    itemsSinceLastControlCheck++;
                 }
             }
 
-            // Mark job as completed
-            await conn.ExecuteAsync(
-                "UPDATE jobs SET status = 'COMPLETED', completed_at = NOW() WHERE id = @Id",
-                new { Id = job.Id });
+            if (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Stopping token triggered; leaving job {JobId} without final completion status.", job.Id);
+                return;
+            }
 
-            _logger.LogInformation("Job {JobId} completed successfully", job.Id);
+            var finalState = await GetJobStateAsync(conn, job.Id);
+            if (finalState == null)
+            {
+                _logger.LogWarning("Job {JobId} no longer exists during finalization.", job.Id);
+                return;
+            }
+
+            if (finalState.Status == "CANCELLED")
+            {
+                await MarkCancelledAsync(conn, job.Id);
+                _logger.LogInformation("Job {JobId} finalized as CANCELLED.", job.Id);
+                return;
+            }
+
+            if (finalState.Status == "PAUSED_BY_SCHEDULE")
+            {
+                _logger.LogInformation("Job {JobId} is PAUSED_BY_SCHEDULE; skipping completion finalization.", job.Id);
+                return;
+            }
+
+            if (finalState.PendingItems > 0)
+            {
+                _logger.LogWarning(
+                    "Job {JobId} still has {PendingItems} PENDING items. Completion status will not be set.",
+                    job.Id,
+                    finalState.PendingItems);
+                return;
+            }
+
+            var finalStatus = finalState.FailedItems > 0 ? "COMPLETED_WITH_ERRORS" : "COMPLETED";
+            var finalizedRows = await conn.ExecuteAsync(
+                @"UPDATE jobs
+                  SET status = @Status, completed_at = NOW()
+                  WHERE id = @Id AND status = 'PROCESSING'",
+                new { Id = job.Id, Status = finalStatus });
+
+            if (finalizedRows == 0)
+            {
+                _logger.LogInformation("Job {JobId} status changed before finalization; completion update skipped.", job.Id);
+                return;
+            }
+
+            _logger.LogInformation("Job {JobId} completed with status {FinalStatus}", job.Id, finalStatus);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            _logger.LogInformation("Job worker cancellation requested while processing job {JobId}", job.Id);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Job {JobId} failed", job.Id);
 
+            var currentStatus = await GetJobStatusAsync(conn, job.Id);
+            if (currentStatus == "CANCELLED")
+            {
+                await MarkCancelledAsync(conn, job.Id);
+                return;
+            }
+
+            if (currentStatus == "PAUSED_BY_SCHEDULE")
+            {
+                _logger.LogInformation("Job {JobId} is paused; skipping FAILED transition.", job.Id);
+                return;
+            }
+
             await conn.ExecuteAsync(
-                "UPDATE jobs SET status = 'FAILED', error_message = @Error, completed_at = NOW() WHERE id = @Id",
+                @"UPDATE jobs
+                  SET status = 'FAILED', error_message = @Error, completed_at = NOW()
+                  WHERE id = @Id AND status = 'PROCESSING'",
                 new { Id = job.Id, Error = ex.Message });
         }
+    }
+
+    private async Task<JobControlAction> CheckJobControlStatusAsync(IDbConnection conn, string jobId)
+    {
+        var status = await GetJobStatusAsync(conn, jobId);
+        if (status == null)
+        {
+            return JobControlAction.Stop;
+        }
+
+        if (status == "CANCELLED")
+        {
+            await MarkCancelledAsync(conn, jobId);
+            return JobControlAction.Stop;
+        }
+
+        if (status == "PAUSED_BY_SCHEDULE")
+        {
+            return JobControlAction.Stop;
+        }
+
+        return JobControlAction.Continue;
+    }
+
+    private async Task<string?> GetJobStatusAsync(IDbConnection conn, string jobId)
+    {
+        return await conn.ExecuteScalarAsync<string?>(
+            "SELECT status FROM jobs WHERE id = @Id",
+            new { Id = jobId });
+    }
+
+    private async Task<JobStateSnapshot?> GetJobStateAsync(IDbConnection conn, string jobId)
+    {
+        return await conn.QueryFirstOrDefaultAsync<JobStateSnapshot>(
+            @"SELECT
+                j.status as Status,
+                j.failed_items as FailedItems,
+                (
+                    SELECT COUNT(*)
+                    FROM job_items ji
+                    WHERE ji.job_id = j.id AND ji.status = 'PENDING'
+                ) as PendingItems
+              FROM jobs j
+              WHERE j.id = @Id",
+            new { Id = jobId });
+    }
+
+    private async Task MarkCancelledAsync(IDbConnection conn, string jobId)
+    {
+        await conn.ExecuteAsync(
+            @"UPDATE jobs
+              SET status = 'CANCELLED', completed_at = COALESCE(completed_at, NOW())
+              WHERE id = @Id AND status = 'CANCELLED'",
+            new { Id = jobId });
     }
 
     private async Task<PresetAstInfo?> GetPresetAstAsync(IDbConnection conn, string presetKey)
@@ -324,6 +481,18 @@ public class JobProcessorWorker : BackgroundService
 public class JobInfo { public string Id { get; set; } = ""; public string PresetKey { get; set; } = ""; public string? ParamsJson { get; set; } }
 public class JobItemInfo { public long Id { get; set; } public string Cedula { get; set; } = ""; }
 public class PresetAstInfo { public string AstJson { get; set; } = ""; public string Dataset { get; set; } = ""; }
+public class JobStateSnapshot
+{
+    public string Status { get; set; } = "";
+    public int FailedItems { get; set; }
+    public int PendingItems { get; set; }
+}
+
+public enum JobControlAction
+{
+    Continue,
+    Stop
+}
 
 public class PresetAst
 {

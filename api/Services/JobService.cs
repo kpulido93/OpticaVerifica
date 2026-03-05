@@ -250,7 +250,7 @@ public class JobService : IJobService
             SET status = @Status, 
                 error_message = @ErrorMessage,
                 started_at = CASE WHEN @Status = 'PROCESSING' AND started_at IS NULL THEN NOW() ELSE started_at END,
-                completed_at = CASE WHEN @Status IN ('COMPLETED', 'FAILED', 'CANCELLED') THEN NOW() ELSE completed_at END
+                completed_at = CASE WHEN @Status IN ('COMPLETED', 'COMPLETED_WITH_ERRORS', 'FAILED', 'CANCELLED') THEN NOW() ELSE completed_at END
             WHERE id = @JobId";
 
         await conn.ExecuteAsync(sql, new { JobId = jobId, Status = status.ToString(), ErrorMessage = errorMessage });

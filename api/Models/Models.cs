@@ -29,6 +29,7 @@ public enum JobStatus
     PENDING,
     PROCESSING,
     COMPLETED,
+    COMPLETED_WITH_ERRORS,
     FAILED,
     CANCELLED,
     PAUSED_BY_SCHEDULE
