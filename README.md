@@ -28,6 +28,15 @@ Variables de autenticación esperadas en `.env`:
 - `AUTH_READER_USER`
 - `AUTH_READER_PASSWORD`
 
+### Roles y variables `AUTH_*`
+
+- Cada rol usa un par `USER` + `PASSWORD`:
+  - `ADMIN`: `AUTH_ADMIN_USER`, `AUTH_ADMIN_PASSWORD`
+  - `OPERATOR`: `AUTH_OPERATOR_USER`, `AUTH_OPERATOR_PASSWORD`
+  - `READER`: `AUTH_READER_USER`, `AUTH_READER_PASSWORD`
+- Si una variable de usuario o contraseña está vacía para un rol, ese rol queda deshabilitado.
+- En `Production`, `ADMIN` es obligatorio: la API no arranca si faltan `AUTH_ADMIN_USER` o `AUTH_ADMIN_PASSWORD`.
+
 ### Mapeo en docker-compose
 
 `docker-compose.yml` lee variables `AUTH_*` desde `.env` y las mapea a configuración .NET `Auth__*`:

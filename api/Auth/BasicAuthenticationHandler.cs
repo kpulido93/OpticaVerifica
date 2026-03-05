@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
@@ -65,27 +66,57 @@ public class BasicAuthenticationHandler : AuthenticationHandler<AuthenticationSc
     {
         var config = Context.RequestServices.GetRequiredService<IConfiguration>();
 
-        var adminUser = config["Auth:AdminUser"];
-        var adminPassword = config["Auth:AdminPassword"];
-        if (username == adminUser && password == adminPassword)
+        if (TryValidateRole(username, password, config["Auth:AdminUser"], config["Auth:AdminPassword"]))
         {
             return (true, "ADMIN");
         }
 
-        var operatorUser = config["Auth:OperatorUser"];
-        var operatorPassword = config["Auth:OperatorPassword"];
-        if (username == operatorUser && password == operatorPassword)
+        if (TryValidateRole(username, password, config["Auth:OperatorUser"], config["Auth:OperatorPassword"]))
         {
             return (true, "OPERATOR");
         }
 
-        var readerUser = config["Auth:ReaderUser"];
-        var readerPassword = config["Auth:ReaderPassword"];
-        if (username == readerUser && password == readerPassword)
+        if (TryValidateRole(username, password, config["Auth:ReaderUser"], config["Auth:ReaderPassword"]))
         {
             return (true, "READER");
         }
 
         return (false, null);
+    }
+
+    private static bool TryValidateRole(
+        string providedUsername,
+        string providedPassword,
+        string? expectedUsername,
+        string? expectedPassword)
+    {
+        if (string.IsNullOrWhiteSpace(expectedUsername) || string.IsNullOrWhiteSpace(expectedPassword))
+        {
+            return false;
+        }
+
+        return SecureEquals(providedUsername, expectedUsername)
+            && SecureEquals(providedPassword, expectedPassword);
+    }
+
+    private static bool SecureEquals(string left, string right)
+    {
+        var leftBytes = Encoding.UTF8.GetBytes(left);
+        var rightBytes = Encoding.UTF8.GetBytes(right);
+        var maxLength = Math.Max(leftBytes.Length, rightBytes.Length);
+
+        if (maxLength == 0)
+        {
+            return true;
+        }
+
+        var paddedLeft = new byte[maxLength];
+        var paddedRight = new byte[maxLength];
+
+        Buffer.BlockCopy(leftBytes, 0, paddedLeft, 0, leftBytes.Length);
+        Buffer.BlockCopy(rightBytes, 0, paddedRight, 0, rightBytes.Length);
+
+        var contentMatches = CryptographicOperations.FixedTimeEquals(paddedLeft, paddedRight);
+        return contentMatches && leftBytes.Length == rightBytes.Length;
     }
 }

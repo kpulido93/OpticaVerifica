@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Configuration
 builder.Configuration.AddEnvironmentVariables();
+ValidateAdminCredentialsForProduction(builder.Configuration, builder.Environment);
 
 var corsOrigins = ResolveCorsOrigins(builder.Configuration, builder.Environment);
 var rateLimitPermitLimit = ResolveIntSetting(builder.Configuration, "RATE_LIMIT_PERMIT_LIMIT", 60, 1);
@@ -225,4 +226,21 @@ static FixedWindowRateLimiterOptions CreateFixedWindowOptions(int permitLimit, i
         QueueLimit = queueLimit,
         AutoReplenishment = true
     };
+}
+
+static void ValidateAdminCredentialsForProduction(IConfiguration configuration, IHostEnvironment environment)
+{
+    if (!environment.IsProduction())
+    {
+        return;
+    }
+
+    var adminUser = configuration["Auth:AdminUser"];
+    var adminPassword = configuration["Auth:AdminPassword"];
+
+    if (string.IsNullOrWhiteSpace(adminUser) || string.IsNullOrWhiteSpace(adminPassword))
+    {
+        throw new InvalidOperationException(
+            "Missing required admin credentials for Production. Set AUTH_ADMIN_USER and AUTH_ADMIN_PASSWORD.");
+    }
 }
