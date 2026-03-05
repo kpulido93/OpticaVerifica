@@ -1,34 +1,63 @@
-# Optima Veriifica
+# Optima Verifica
 
-Este repositorio corresponde a **Optima Veriifica**.
+Este repositorio corresponde a **Optima Verifica**.
 
-## Modo de autenticación (solo ADMIN)
-
-La aplicación está documentada para operar en modo **solo ADMIN** con **Basic Auth**.
-Cualquier acceso autenticado se considera con permisos de administración.
-
-Variables esperadas:
-
-- `ADMIN_USER`: usuario administrador para Basic Auth.
-- `ADMIN_PASS`: contraseña del administrador para Basic Auth.
-
-## Configuración de entorno
-
-Usa el archivo de ejemplo para variables de entorno:
+## Quickstart
 
 ```bash
 cp .env.example .env
+docker compose up -d --build
 ```
 
-Variables incluidas en el ejemplo:
+## Basic Auth con roles
+
+La API usa autenticación **Basic Auth** con 3 roles:
+
+- `ADMIN`: acceso total.
+- `OPERATOR`: puede crear y gestionar jobs operativos.
+- `READER`: solo lectura.
+
+Por ahora puedes operar únicamente con credenciales de `ADMIN`; las cuentas `OPERATOR` y `READER` se mantienen disponibles para habilitación posterior.
+
+Variables de autenticación esperadas en `.env`:
+
+- `AUTH_ADMIN_USER`
+- `AUTH_ADMIN_PASSWORD`
+- `AUTH_OPERATOR_USER`
+- `AUTH_OPERATOR_PASSWORD`
+- `AUTH_READER_USER`
+- `AUTH_READER_PASSWORD`
+
+### Mapeo en docker-compose
+
+`docker-compose.yml` lee variables `AUTH_*` desde `.env` y las mapea a configuración .NET `Auth__*`:
+
+- `AUTH_ADMIN_USER` -> `Auth__AdminUser`
+- `AUTH_ADMIN_PASSWORD` -> `Auth__AdminPassword`
+- `AUTH_OPERATOR_USER` -> `Auth__OperatorUser`
+- `AUTH_OPERATOR_PASSWORD` -> `Auth__OperatorPassword`
+- `AUTH_READER_USER` -> `Auth__ReaderUser`
+- `AUTH_READER_PASSWORD` -> `Auth__ReaderPassword`
+
+## Configuración de entorno
+
+Usa `.env.example` como base. Incluye, entre otras, estas variables:
 
 - `TZ=America/Santo_Domingo`
-- `ADMIN_USER=admin`
-- `ADMIN_PASS=admin123`
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`, `MYSQL_ROOT_PASSWORD`
+- `API_PORT`, `API_ENVIRONMENT`
+- `NEXT_PUBLIC_API_URL`, `NEXT_PUBLIC_APP_NAME`
+- `WORKER_MAX_CONCURRENT_JOBS`, `WORKER_BATCH_SIZE`, `WORKER_MAX_IDS_PER_JOB`
+- `CORS_ALLOWED_ORIGINS`
+- `RATE_LIMIT_PERMIT_LIMIT`, `RATE_LIMIT_WINDOW_SECONDS`, `RATE_LIMIT_QUEUE_LIMIT`
 
 ## API
 
-Los endpoints bajo `/api/admin/*` deben requerir autenticación Basic Auth en modo solo ADMIN.
+Las políticas de autorización disponibles son:
+
+- `AdminOnly`: `ADMIN`
+- `OperatorOrAbove`: `ADMIN`, `OPERATOR`
+- `AnyRole`: `ADMIN`, `OPERATOR`, `READER`
 
 ## Migraciones de base de datos (automáticas)
 

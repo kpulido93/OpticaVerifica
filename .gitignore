@@ -17,6 +17,7 @@ obj/
 # IDE
 .idea/
 .vscode/
+/.gitconfig
 *.suo
 *.user
 *.sln.docstates
