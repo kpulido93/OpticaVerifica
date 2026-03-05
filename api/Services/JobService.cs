@@ -218,13 +218,19 @@ public class JobService : IJobService
 
         var results = await conn.QueryAsync<dynamic>(sql, new { JobId = jobId, PageSize = pageSize, Offset = offset });
 
-        var parsedResults = results.Select(r =>
-        {
-            var dict = JsonConvert.DeserializeObject<Dictionary<string, object>>(r.ResultJson) 
-                ?? new Dictionary<string, object>();
-            dict["cedula"] = r.Cedula;
-            return dict;
-        }).ToList();
+        List<Dictionary<string, object>> parsedResults = ((IEnumerable<dynamic>)results)
+            .Select(r =>
+            {
+                string resultJson = (string)r.ResultJson;
+                string cedula = (string)r.Cedula;
+
+                var dict = JsonConvert.DeserializeObject<Dictionary<string, object>>(resultJson)
+                           ?? new Dictionary<string, object>();
+
+                dict["cedula"] = cedula;
+                return dict;
+            })
+            .ToList();
 
         return new JobResultsResponse
         {
