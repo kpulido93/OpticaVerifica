@@ -59,7 +59,9 @@ public class PresetExecutor : IPresetExecutor
         using var conn = _dbFactory.CreateConnection();
         var results = await conn.QueryAsync<dynamic>(sql, sqlParams);
 
-        return results.Select(r => ConvertDynamicToDict(r)).ToList();
+        return results
+        .Select(r => ConvertDynamicToDict((object)r))
+        .ToList();
     }
 
     public async Task<(string sql, List<Dictionary<string, object>> results, long executionTimeMs)> ExecuteAndExplainAsync(
@@ -268,7 +270,9 @@ public class PresetExecutor : IPresetExecutor
             LIMIT 5";
 
         var results = await conn.QueryAsync<dynamic>(sql, new { Cedula = cedula });
-        return results.Select(r => ConvertDynamicToDict(r)).ToList();
+        return results
+            .Select(r => ConvertDynamicToDict((object)r))
+            .ToList();
     }
 
     private async Task<List<Dictionary<string, object>>> ExecuteCompanerosSalarioAsync(string cedula, Dictionary<string, object>? parameters)
@@ -337,7 +341,9 @@ public class PresetExecutor : IPresetExecutor
             MaxSalary = maxSalary
         });
 
-        return results.Select(r => ConvertDynamicToDict(r)).ToList();
+        return results
+    .Select(r => ConvertDynamicToDict((object)r))
+    .ToList();
     }
 
     private async Task<List<Dictionary<string, object>>> ExecuteVehiculoExisteAsync(string cedula)

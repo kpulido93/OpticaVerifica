@@ -58,6 +58,7 @@ builder.Services.AddScoped<IJobService, JobService>();
 builder.Services.AddScoped<ISchemaService, SchemaService>();
 builder.Services.AddScoped<IExportService, ExportService>();
 builder.Services.AddScoped<IPresetExecutor, PresetExecutor>();
+builder.Services.AddScoped<IIdsParserService, IdsParserService>();
 
 // CORS
 builder.Services.AddCors(options =>
@@ -88,6 +89,7 @@ app.UseAuthorization();
 app.MapPresetEndpoints();
 app.MapJobEndpoints();
 app.MapAdminEndpoints();
+app.MapIdsEndpoints();
 app.MapHealthEndpoints();
 
 app.Run();
