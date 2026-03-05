@@ -13,6 +13,8 @@ public class JobProcessorWorker : BackgroundService
     private readonly int _maxConcurrentJobs;
     private readonly int _batchSize;
     private const int StatusCheckEveryItems = 10;
+    private static readonly TimeSpan MissingSchemaWarningInterval = TimeSpan.FromMinutes(1);
+    private DateTime _lastMissingSchemaWarningUtc = DateTime.MinValue;
 
     public JobProcessorWorker(ILogger<JobProcessorWorker> logger, IConfiguration config)
     {
@@ -48,17 +50,56 @@ public class JobProcessorWorker : BackgroundService
         using var conn = new MySqlConnection(_connectionString);
         await conn.OpenAsync(stoppingToken);
 
-        // Get pending jobs
-        var pendingJobs = await conn.QueryAsync<JobInfo>(
-            @"SELECT id as Id, preset_key as PresetKey, params_json as ParamsJson
-              FROM jobs 
-              WHERE status = 'PENDING'
-              ORDER BY created_at
-              LIMIT @Limit",
-            new { Limit = _maxConcurrentJobs });
+        if (!await RequiredTablesExistAsync(conn))
+        {
+            LogMissingSchemaWarning();
+            return;
+        }
+
+        IEnumerable<JobInfo> pendingJobs;
+        try
+        {
+            // Get pending jobs
+            pendingJobs = await conn.QueryAsync<JobInfo>(
+                @"SELECT id as Id, preset_key as PresetKey, params_json as ParamsJson
+                  FROM jobs
+                  WHERE status = 'PENDING'
+                  ORDER BY created_at
+                  LIMIT @Limit",
+                new { Limit = _maxConcurrentJobs });
+        }
+        catch (MySqlException ex) when (ex.Number == 1146)
+        {
+            LogMissingSchemaWarning();
+            return;
+        }
 
         var tasks = pendingJobs.Select(job => ProcessJobAsync(job, stoppingToken));
         await Task.WhenAll(tasks);
+    }
+
+    private async Task<bool> RequiredTablesExistAsync(IDbConnection conn)
+    {
+        var tableCount = await conn.ExecuteScalarAsync<int>(
+            @"SELECT COUNT(*)
+              FROM information_schema.tables
+              WHERE table_schema = DATABASE()
+                AND table_name IN ('jobs', 'job_items', 'job_results')");
+
+        return tableCount == 3;
+    }
+
+    private void LogMissingSchemaWarning()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _lastMissingSchemaWarningUtc < MissingSchemaWarningInterval)
+        {
+            return;
+        }
+
+        _lastMissingSchemaWarningUtc = now;
+        _logger.LogWarning(
+            "Worker schema not ready (missing jobs/job_items/job_results). Waiting for migrator to apply DB migrations.");
     }
 
     private async Task ProcessJobAsync(JobInfo job, CancellationToken stoppingToken)
