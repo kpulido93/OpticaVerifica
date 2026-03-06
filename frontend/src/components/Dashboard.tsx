@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 import { Upload, FileText, Play, RefreshCw, Zap } from 'lucide-react'
 import { getPresets, createJob, parseIdsFile, Preset } from '@/lib/api'
@@ -26,6 +26,7 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
   const [selectedFileColumn, setSelectedFileColumn] = useState('')
   const [fileIds, setFileIds] = useState<string[]>([])
   const [fileSampleRows, setFileSampleRows] = useState<Record<string, string>[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const loadPresets = useCallback(async () => {
     setIsLoadingPresets(true)
@@ -142,19 +143,25 @@ export default function Dashboard({ onJobCreated }: DashboardProps) {
               <FileText className="w-5 h-5 text-primary" />
               Cédulas a Consultar
             </h2>
-            <label className="cursor-pointer">
-              <input
-                type="file"
-                accept=".csv,.xlsx"
-                onChange={handleFileUpload}
-                className="hidden"
-                data-testid="file-upload-input"
-              />
-              <Button variant="secondary" size="sm" data-testid="upload-file-btn" isLoading={isParsingFile}>
-                <Upload className="w-4 h-4 mr-2" />
-                Cargar CSV/XLSX
-              </Button>
-            </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={handleFileUpload}
+              className="sr-only"
+              data-testid="file-upload-input"
+            />
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              data-testid="upload-file-btn"
+              isLoading={isParsingFile}
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Cargar CSV/XLSX
+            </Button>
           </div>
 
           {uploadedFile && (
