@@ -1,5 +1,6 @@
 using Dapper;
 using OptimaVerifica.Api.Models;
+using System.Data;
 
 namespace OptimaVerifica.Api.Services;
 
@@ -12,6 +13,7 @@ public interface ISchemaService
     Task<bool> IsColumnAllowedAsync(string dataset, string tableName, string columnName);
     Task<List<AllowedOperator>> GetAllowedOperatorsAsync();
     Task<bool> IsOperatorAllowedAsync(string operatorKey);
+    Task RefreshAllowedSchemaAsync(string dataset, string[]? includeTables = null, string[]? excludeTables = null);
 }
 
 public class SchemaService : ISchemaService
@@ -134,5 +136,135 @@ public class SchemaService : ISchemaService
         var sql = "SELECT COUNT(*) FROM allowed_operators WHERE operator_key = @OperatorKey AND is_enabled = 1";
         var count = await conn.ExecuteScalarAsync<int>(sql, new { OperatorKey = operatorKey });
         return count > 0;
+    }
+
+    public async Task RefreshAllowedSchemaAsync(string dataset, string[]? includeTables = null, string[]? excludeTables = null)
+    {
+        if (string.IsNullOrWhiteSpace(dataset))
+        {
+            throw new ArgumentException("Dataset is required.", nameof(dataset));
+        }
+
+        var include = NormalizeTableFilter(includeTables);
+        var exclude = NormalizeTableFilter(excludeTables);
+
+        if (includeTables != null && include.Length == 0)
+        {
+            _logger.LogInformation("Schema refresh skipped for dataset {Dataset}: includeTables was provided but empty.", dataset);
+            return;
+        }
+
+        using var conn = _dbFactory.CreateConnection();
+        conn.Open();
+        using var tx = conn.BeginTransaction();
+
+        var whereParts = new List<string> { "c.table_schema = DATABASE()" };
+        var queryParams = new DynamicParameters();
+
+        if (include.Length > 0)
+        {
+            whereParts.Add("c.table_name IN @IncludeTables");
+            queryParams.Add("IncludeTables", include);
+        }
+
+        if (exclude.Length > 0)
+        {
+            whereParts.Add("c.table_name NOT IN @ExcludeTables");
+            queryParams.Add("ExcludeTables", exclude);
+        }
+
+        var schemaRows = (await conn.QueryAsync<InformationSchemaColumnRow>(
+            $@"SELECT
+                   c.table_name as TableName,
+                   c.column_name as ColumnName,
+                   c.column_type as ColumnType
+               FROM information_schema.columns c
+               WHERE {string.Join(" AND ", whereParts)}
+               ORDER BY c.table_name, c.ordinal_position",
+            queryParams,
+            tx)).ToList();
+
+        if (include.Length > 0)
+        {
+            await conn.ExecuteAsync(
+                @"DELETE FROM preset_allowed_schema
+                  WHERE dataset = @Dataset
+                    AND table_name IN @IncludeTables",
+                new { Dataset = dataset, IncludeTables = include },
+                tx);
+        }
+        else if (exclude.Length > 0)
+        {
+            await conn.ExecuteAsync(
+                @"DELETE FROM preset_allowed_schema
+                  WHERE dataset = @Dataset
+                    AND table_name NOT IN @ExcludeTables",
+                new { Dataset = dataset, ExcludeTables = exclude },
+                tx);
+        }
+        else
+        {
+            await conn.ExecuteAsync(
+                "DELETE FROM preset_allowed_schema WHERE dataset = @Dataset",
+                new { Dataset = dataset },
+                tx);
+        }
+
+        if (schemaRows.Count > 0)
+        {
+            await conn.ExecuteAsync(
+                @"INSERT INTO preset_allowed_schema
+                    (dataset, table_name, column_name, column_type, is_filterable, is_sortable, is_selectable, display_name)
+                  VALUES
+                    (@Dataset, @TableName, @ColumnName, @ColumnType, 1, 1, 1, NULL)
+                  ON DUPLICATE KEY UPDATE
+                    column_type = VALUES(column_type),
+                    is_filterable = VALUES(is_filterable),
+                    is_sortable = VALUES(is_sortable),
+                    is_selectable = VALUES(is_selectable),
+                    display_name = VALUES(display_name)",
+                schemaRows.Select(row => new
+                {
+                    Dataset = dataset,
+                    row.TableName,
+                    row.ColumnName,
+                    ColumnType = Truncate(row.ColumnType, 50)
+                }),
+                tx);
+        }
+
+        tx.Commit();
+        _logger.LogInformation("Refreshed allowed schema for dataset {Dataset}. Rows upserted: {Rows}.", dataset, schemaRows.Count);
+    }
+
+    private static string[] NormalizeTableFilter(string[]? tables)
+    {
+        if (tables == null)
+        {
+            return Array.Empty<string>();
+        }
+
+        return tables
+            .Where(table => !string.IsNullOrWhiteSpace(table))
+            .Select(table => table.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..maxLength];
+    }
+
+    private sealed class InformationSchemaColumnRow
+    {
+        public string TableName { get; set; } = string.Empty;
+        public string ColumnName { get; set; } = string.Empty;
+        public string ColumnType { get; set; } = string.Empty;
     }
 }

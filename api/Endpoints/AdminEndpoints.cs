@@ -22,6 +22,10 @@ public static class AdminEndpoints
             .WithName("GetSchema")
             .WithSummary("Get allowed schema (tables, columns, operators) for a dataset");
 
+        group.MapPost("/schema/{dataset}/refresh", RefreshSchema)
+            .WithName("RefreshSchema")
+            .WithSummary("Refresh allowed schema from information_schema for a dataset");
+
         group.MapGet("/datasets", GetDatasets)
             .WithName("GetDatasets")
             .WithSummary("Get list of available datasets");
@@ -83,6 +87,21 @@ public static class AdminEndpoints
     {
         var schema = await schemaService.GetAllowedSchemaAsync("neon_templaris");
         return Results.Ok(schema);
+    }
+
+    private static async Task<IResult> RefreshSchema(
+        string dataset,
+        [FromServices] ISchemaService schemaService,
+        [FromBody] RefreshSchemaRequest? request = null)
+    {
+        await schemaService.RefreshAllowedSchemaAsync(dataset, request?.IncludeTables, request?.ExcludeTables);
+        var tables = await schemaService.GetAllowedTablesAsync(dataset);
+
+        return Results.Ok(new
+        {
+            message = $"Allowed schema refreshed for dataset '{dataset}'",
+            tablesCount = tables.Count
+        });
     }
 
     private static IResult GetDatasets()
@@ -506,6 +525,12 @@ public class TestAstRequest
 {
     public NormalizedAst Ast { get; set; } = new();
     public string Cedula { get; set; } = string.Empty;
+}
+
+public class RefreshSchemaRequest
+{
+    public string[]? IncludeTables { get; set; }
+    public string[]? ExcludeTables { get; set; }
 }
 
 // Normalized AST format (from Preset Designer)
