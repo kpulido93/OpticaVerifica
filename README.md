@@ -80,6 +80,14 @@ Las políticas de autorización disponibles son:
 - `OperatorOrAbove`: `ADMIN`, `OPERATOR`
 - `AnyRole`: `ADMIN`, `OPERATOR`, `READER`
 
+### Health checks
+
+- `GET /health/live`: liveness del proceso (siempre `200 OK` cuando la API está levantada).
+- `GET /health/ready`: readiness con validación de MySQL (`SELECT 1`).
+- Alias mantenidos:
+  - `GET /health` -> liveness
+  - `GET /api/health` -> readiness
+
 ## Migraciones de base de datos (automáticas)
 
 El proyecto usa migraciones SQL por scripts en `db/migrations/` y un servicio dedicado `src/Migrator` (DbUp + Dapper-friendly) para ejecutarlas **automáticamente** en cada arranque de stack.

@@ -1,3 +1,7 @@
+using System.Text.Json;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
 namespace OptimaVerifica.Api.Endpoints;
 
 public static class HealthEndpoints
@@ -13,16 +17,48 @@ public static class HealthEndpoints
         .WithTags("Health")
         .AllowAnonymous();
 
-        app.MapGet("/health", () => Results.Ok(new { status = "healthy" }))
+        app.MapGet("/health/live", () => Results.Ok(new { status = "live" }))
             .WithTags("Health")
             .AllowAnonymous();
 
-        app.MapGet("/api/health", () => Results.Ok(new 
-        { 
-            status = "healthy",
-            timestamp = DateTime.UtcNow 
-        }))
+        app.MapHealthChecks("/health/ready", new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("ready"),
+            ResponseWriter = WriteHealthCheckResponseAsync
+        })
         .WithTags("Health")
         .AllowAnonymous();
+
+        // Backward-compatible aliases
+        app.MapGet("/health", () => Results.Ok(new { status = "live" }))
+            .WithTags("Health")
+            .AllowAnonymous();
+
+        app.MapHealthChecks("/api/health", new HealthCheckOptions
+        {
+            Predicate = check => check.Tags.Contains("ready"),
+            ResponseWriter = WriteHealthCheckResponseAsync
+        })
+        .WithTags("Health")
+        .AllowAnonymous();
+    }
+
+    private static async Task WriteHealthCheckResponseAsync(HttpContext context, HealthReport report)
+    {
+        context.Response.ContentType = "application/json";
+
+        var payload = new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(entry => new
+            {
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                description = entry.Value.Description
+            }),
+            durationMs = report.TotalDuration.TotalMilliseconds
+        };
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
     }
 }

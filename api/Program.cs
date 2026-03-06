@@ -2,9 +2,11 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.OpenApi.Models;
 using OptimaVerifica.Api.Auth;
 using OptimaVerifica.Api.Endpoints;
+using OptimaVerifica.Api.HealthChecks;
 using OptimaVerifica.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -68,6 +70,13 @@ builder.Services.AddScoped<ISchemaService, SchemaService>();
 builder.Services.AddScoped<IExportService, ExportService>();
 builder.Services.AddScoped<IPresetExecutor, PresetExecutor>();
 builder.Services.AddScoped<IIdsParserService, IdsParserService>();
+
+// Health checks
+builder.Services.AddHealthChecks()
+    .AddCheck<MySqlReadinessHealthCheck>(
+        "mysql",
+        failureStatus: HealthStatus.Unhealthy,
+        tags: ["ready"]);
 
 // CORS
 builder.Services.AddCors(options =>
@@ -146,11 +155,8 @@ app.Use(async (context, next) =>
 app.UseCors("AllowFrontend");
 app.UseRateLimiter();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseAuthentication();
 app.UseAuthorization();
