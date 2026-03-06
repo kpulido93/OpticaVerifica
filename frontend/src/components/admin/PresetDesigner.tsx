@@ -29,6 +29,7 @@ import {
 } from 'lucide-react'
 import {
   getSchema,
+  refreshSchema,
   getDatasets,
   SchemaResponse,
   TableSchema,
@@ -85,6 +86,17 @@ interface FilterRule {
   operator: string
   value: any
   dataType: DataType
+}
+
+interface BackendFilterGroup {
+  logic: 'AND' | 'OR'
+  filters: Array<{
+    table: string
+    column: string
+    operator: string
+    value: any
+  }>
+  groups: BackendFilterGroup[]
 }
 
 interface OrderByClause {
@@ -543,6 +555,7 @@ export default function PresetDesigner() {
   const [selectedDataset, setSelectedDataset] = useState<string>('')
   const [schema, setSchema] = useState<SchemaResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [isRefreshingSchema, setIsRefreshingSchema] = useState(false)
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set())
 
   // Preset info
@@ -614,6 +627,28 @@ export default function PresetDesigner() {
     }
     setIsLoading(false)
   }, [selectedDataset])
+
+  const handleRefreshSchema = async () => {
+    if (!selectedDataset) {
+      toast.error('Selecciona un dataset primero')
+      return
+    }
+
+    setIsRefreshingSchema(true)
+
+    try {
+      const { error } = await refreshSchema(selectedDataset)
+      if (error) {
+        toast.error(error)
+      } else {
+        toast.success('Schema refrescado')
+      }
+
+      await loadSchema()
+    } finally {
+      setIsRefreshingSchema(false)
+    }
+  }
 
   useEffect(() => {
     loadDatasets()
@@ -710,12 +745,12 @@ export default function PresetDesigner() {
   const toBackendAst = useCallback(() => {
     const ast = buildAst()
 
-    const mapFilterGroup = (group: FilterGroup) => {
+    const mapFilterGroup = (group: FilterGroup): BackendFilterGroup => {
       const filtersOnly = group.rules.filter((r) => !('op' in r && 'rules' in r)) as FilterRule[]
       const groupsOnly = group.rules.filter((r) => 'op' in r && 'rules' in r) as FilterGroup[]
 
       return {
-        logic: group.op.toUpperCase(),
+        logic: group.op.toUpperCase() as 'AND' | 'OR',
         filters: filtersOnly.map((rule) => {
           const [table, column] = rule.field.split('.')
           return { table, column, operator: rule.operator, value: rule.value }
@@ -975,57 +1010,76 @@ export default function PresetDesigner() {
 
             {/* Schema Explorer Tree */}
             <Card data-testid="schema-explorer-card" className="max-h-[500px] overflow-y-auto">
-              <h3 className="font-semibold mb-3 flex items-center gap-2 sticky top-0 bg-surface pb-2">
-                <FolderTree className="w-5 h-5 text-accent" />
-                Schema Explorer
-              </h3>
+              <div className="flex items-center justify-between mb-3 sticky top-0 bg-surface pb-2 z-10">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <FolderTree className="w-5 h-5 text-accent" />
+                  Schema Explorer
+                </h3>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleRefreshSchema}
+                  isLoading={isRefreshingSchema}
+                  disabled={!selectedDataset}
+                  data-testid="refresh-schema-btn"
+                >
+                  Refrescar schema
+                </Button>
+              </div>
               <div className="space-y-1">
-                {schema?.tables.map((table) => (
-                  <div key={table.tableName}>
-                    <button
-                      onClick={() => toggleTable(table.tableName)}
-                      className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-surface-highlight transition-colors text-left"
-                      data-testid={`table-toggle-${table.tableName}`}
-                    >
-                      {expandedTables.has(table.tableName) ? (
-                        <ChevronDown className="w-4 h-4 text-zinc-500" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-zinc-500" />
-                      )}
-                      <Table2 className="w-4 h-4 text-primary" />
-                      <span className="text-white font-medium">{table.tableName}</span>
-                      <span className="text-xs text-zinc-500 ml-auto">{table.columns.length}</span>
-                    </button>
+                {(schema?.tables.length ?? 0) === 0 ? (
+                  <p className="text-zinc-500 text-sm py-4 text-center">
+                    No hay tablas configuradas. Ejecuta 'Refrescar schema' o revisa preset_allowed_schema.
+                  </p>
+                ) : (
+                  schema?.tables.map((table) => (
+                    <div key={table.tableName}>
+                      <button
+                        onClick={() => toggleTable(table.tableName)}
+                        className="w-full flex items-center gap-2 p-2 rounded-lg hover:bg-surface-highlight transition-colors text-left"
+                        data-testid={`table-toggle-${table.tableName}`}
+                      >
+                        {expandedTables.has(table.tableName) ? (
+                          <ChevronDown className="w-4 h-4 text-zinc-500" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-zinc-500" />
+                        )}
+                        <Table2 className="w-4 h-4 text-primary" />
+                        <span className="text-white font-medium">{table.tableName}</span>
+                        <span className="text-xs text-zinc-500 ml-auto">{table.columns.length}</span>
+                      </button>
 
-                    {expandedTables.has(table.tableName) && (
-                      <div className="ml-6 space-y-0.5 py-1">
-                        {table.columns.map((col) => {
-                          const dataType = getDataType(col.columnType)
-                          const isSelected = selectedColumns.some(c => c.expr === `${table.tableName}.${col.columnName}`)
-                          
-                          return (
-                            <button
-                              key={col.columnName}
-                              onClick={() => addColumn(table.tableName, col)}
-                              disabled={isSelected}
-                              className={`w-full flex items-center gap-2 p-1.5 pl-2 rounded text-left text-sm transition-colors ${
-                                isSelected
-                                  ? 'bg-primary/10 text-primary cursor-not-allowed'
-                                  : 'hover:bg-surface-highlight text-zinc-400 hover:text-white'
-                              }`}
-                              data-testid={`col-${table.tableName}-${col.columnName}`}
-                            >
-                              <DataTypeIcon type={dataType} className="w-3.5 h-3.5" />
-                              <span className="truncate">{col.displayName || col.columnName}</span>
-                              <span className="text-xs text-zinc-600 ml-auto">{col.columnType}</span>
-                              {isSelected && <Check className="w-3 h-3 text-primary" />}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                      {expandedTables.has(table.tableName) && (
+                        <div className="ml-6 space-y-0.5 py-1">
+                          {table.columns.map((col) => {
+                            const dataType = getDataType(col.columnType)
+                            const isSelected = selectedColumns.some(c => c.expr === `${table.tableName}.${col.columnName}`)
+                            
+                            return (
+                              <button
+                                key={col.columnName}
+                                onClick={() => addColumn(table.tableName, col)}
+                                disabled={isSelected}
+                                className={`w-full flex items-center gap-2 p-1.5 pl-2 rounded text-left text-sm transition-colors ${
+                                  isSelected
+                                    ? 'bg-primary/10 text-primary cursor-not-allowed'
+                                    : 'hover:bg-surface-highlight text-zinc-400 hover:text-white'
+                                }`}
+                                data-testid={`col-${table.tableName}-${col.columnName}`}
+                              >
+                                <DataTypeIcon type={dataType} className="w-3.5 h-3.5" />
+                                <span className="truncate">{col.displayName || col.columnName}</span>
+                                <span className="text-xs text-zinc-600 ml-auto">{col.columnType}</span>
+                                {isSelected && <Check className="w-3 h-3 text-primary" />}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
               </div>
             </Card>
 

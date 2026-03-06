@@ -232,6 +232,16 @@ export async function getSchema(dataset: string): Promise<ApiResponse<SchemaResp
   return apiFetch<SchemaResponse>(`/api/admin/schema/${dataset}`)
 }
 
+export async function refreshSchema(
+  dataset: string,
+  body?: { includeTables?: string[]; excludeTables?: string[] }
+): Promise<ApiResponse<{ message: string; tablesCount: number }>> {
+  return apiFetch<{ message: string; tablesCount: number }>(`/api/admin/schema/${dataset}/refresh`, {
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+  })
+}
+
 export async function getDefaultSchema(): Promise<ApiResponse<SchemaResponse>> {
   return apiFetch<SchemaResponse>('/api/admin/schema')
 }
